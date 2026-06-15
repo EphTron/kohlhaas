@@ -249,7 +249,7 @@ public class BoxerController : MonoBehaviour
         float centerToTargetDistance = Vector3.Distance(center, leftHandTarget.position);
         float centerToTipDistance = Vector3.Distance(leftGloveTip.position, center); 
 
-        Debug.Log($"Tip to Target: {tipToTargetDistance}, Target to Center: {centerToTargetDistance}, Tip to Center: {centerToTipDistance}, Max Reach from Center Left: {maxReachFromCenterLeft}"); 
+        Debug.Log($"Left Tip to Target: {tipToTargetDistance}, Target to Center: {centerToTargetDistance}, Tip to Center: {centerToTipDistance}, Max Reach from Center Left: {maxReachFromCenterLeft}"); 
         if (tipToTargetDistance > threshhold) // is not reachable
         { 
             stepSizeLeft = stepSizeLeft / 2; 
@@ -282,7 +282,7 @@ public class BoxerController : MonoBehaviour
         float centerToTargetDistance = Vector3.Distance(center, rightHandTarget.position);
         float centerToTipDistance = Vector3.Distance(rightGloveTip.position, center);
 
-        Debug.Log($"Tip to Target: {tipToTargetDistance}, Target to Center: {centerToTargetDistance}, Tip to Center: {centerToTipDistance}, Max Reach from Center Left: {maxReachFromCenterLeft}");
+        Debug.Log($"Right Tip to Target: {tipToTargetDistance}, Target to Center: {centerToTargetDistance}, Tip to Center: {centerToTipDistance}, Max Reach from Center Left: {maxReachFromCenterLeft}");
         if (tipToTargetDistance > threshhold) // is not reachable
         {
             stepSizeRight = stepSizeRight / 2;
@@ -292,11 +292,16 @@ public class BoxerController : MonoBehaviour
                 maxReachFromCenterRight = centerToTipDistance;
             }
 
-            if (Mathf.Abs(centerToTargetDistance - centerToTipDistance) <= threshhold || stepSizeRight <= originalStepSize / 32)
+            if (Mathf.Abs(centerToTargetDistance - centerToTipDistance) <= threshhold)
             {
                 rightHandTarget.position = center + direction * maxReachFromCenterRight;
                 isCalibratedRight = true;
-                Debug.Log("Left Hand Calibration complete. Max Reach from Center Left: " + maxReachFromCenterRight);
+                Debug.Log("Right Hand Calibration complete due to threshold. Max Reach from Center Left: " + maxReachFromCenterRight);
+            } else if (stepSizeRight <= originalStepSize / 64)
+            {
+                rightHandTarget.position = center + direction * maxReachFromCenterRight;
+                isCalibratedRight = true;
+                Debug.Log("Right Hand Calibration complete due to size. Max Reach from Center Left: " + maxReachFromCenterRight);
             }
         }
         else // within threshhold - means reachable
