@@ -983,8 +983,8 @@ MonoBehaviour:
   m_Name: Android
   m_EditorClassIdentifier: 
   features:
-  - {fileID: -7954870235641906656}
   - {fileID: -6044867510301224307}
+  - {fileID: -7954870235641906656}
   - {fileID: 4545722269166416567}
   - {fileID: 3194956746042730862}
   - {fileID: -1463179209617672830}
@@ -1043,7 +1043,7 @@ MonoBehaviour:
   m_symmetricProjection: 0
   m_optimizeMultiviewRenderRegions: 0
   m_multiviewRenderRegionsOptimizationMode: 0
-  m_hasMigratedMultiviewRenderRegionSetting: 0
+  m_hasMigratedMultiviewRenderRegionSetting: 1
   m_foveatedRenderingApi: 0
   m_useOpenXRPredictedTime: 0
 --- !u!114 &9069291680686742321

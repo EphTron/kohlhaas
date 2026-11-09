@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.Animations.Rigging;
 using UnityEngine.InputSystem;
 
-public class PunchIKController : MonoBehaviour
+public class DeprecatedBoxingController2 : MonoBehaviour
 {
     public enum AttackType { Punch, Hook, Uppercut }
 

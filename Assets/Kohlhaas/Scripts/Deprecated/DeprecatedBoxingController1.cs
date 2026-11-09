@@ -1,9 +1,8 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Animations.Rigging;
-using UnityEditor.Timeline.Actions;
 
-public class BoxMechanicController : MonoBehaviour
+public class DeprecatedBoxingController1 : MonoBehaviour
 {
     [Header("Input")]
     public InputActionProperty MoveAction;

@@ -1,330 +1,207 @@
 using UnityEngine;
+using UnityEngine.Animations.Rigging;
 using UnityEngine.InputSystem;
-using System.Collections;
 
-public class BoxerController : MonoBehaviour
+[DisallowMultipleComponent]
+[DefaultExecutionOrder(-50)]
+public sealed class BoxingController : MonoBehaviour
 {
-    [Header("Input")]
-    public InputActionProperty MoveAction;
-    public InputActionProperty LookPosAction;
-    public InputActionProperty DashAction;
-    public InputActionProperty LeftHookAction;
-    public InputActionProperty RightHookAction;
-    public InputActionProperty UppercutAction;
+    [Header("Rig")]
+    [Tooltip("Unanimated character root used as the local space for punch paths.")]
+    [SerializeField] private Transform targetSpace;
+    [SerializeField] private TwoBoneIKConstraint leftArmIK;
+    [SerializeField] private TwoBoneIKConstraint rightArmIK;
+    [SerializeField, Range(0.5f, 1f)] private float reachLimit = 0.98f;
 
-    [Header("References")]
-    public Camera MainCamera;
-    public Transform head;
-    public Transform leftShoulder;
-    public Transform rightShoulder;
-    public Transform leftGloveTip;
-    public Transform rightGloveTip;
-    public Transform leftHandTarget;
-    public Transform rightHandTarget;
-    [SerializeField] private Animator animator;
+    [Header("Guard (relative to Target Space)")]
+    [SerializeField] private Vector3 leftGuard = new Vector3(-0.18f, 1.4f, 0.28f);
+    [SerializeField] private Vector3 rightGuard = new Vector3(0.18f, 1.4f, 0.28f);
 
-    [Header("Movement Settings")]
-    public float moveSpeed = 5f;
-    public float headHeight = 1.6f;
+    [Header("Straight Punch")]
+    [SerializeField, Min(0f)] private float straightDistance = 0.38f;
+    [SerializeField, Min(0.01f)] private float straightExtensionTime = 0.075f;
+    [SerializeField, Min(0.01f)] private float straightRetractionTime = 0.13f;
 
-    public float dashDistance = 3f;
-    public float dashDuration = 0.2f;
-    private bool isDashing = false;
+    [Header("Swing Punch")]
+    [SerializeField, Min(0f)] private float swingDistance = 0.35f;
+    [SerializeField, Min(0f)] private float swingWidth = 0.3f;
+    [SerializeField, Min(0f)] private float swingInwardDistance = 0.25f;
+    [SerializeField, Min(0.01f)] private float swingExtensionTime = 0.12f;
+    [SerializeField, Min(0.01f)] private float swingRetractionTime = 0.18f;
 
-    public float punchDurationLeft = 0.2f;
-    private bool isPunchingLeft = false;
+    [Header("Controls")]
+    [SerializeField] private BoxingMode mode = BoxingMode.Straight;
+    [SerializeField, Min(0f)] private float extensionHoldTime = 0.025f;
+    [SerializeField] private bool readPlayerInput = true;
+    [SerializeField] private bool showModeLabel = true;
 
-    public float punchDurationRight = 0.2f;
-    private bool isPunchingRight = false;
+    public BoxingMode Mode => mode;
+    public bool IsPunchingLeft => leftHand != null && leftHand.motion.IsActive;
+    public bool IsPunchingRight => rightHand != null && rightHand.motion.IsActive;
 
-    private Vector3 targetPoint;
-    private Vector2 moveInput;
-    private Vector3 moveVector;
-    private Vector3 leftHandStartPos;
-    private Vector3 rightHandStartPos;
-    
-    private float currentSpeed;
-    private float maxReachFromCenterLeft = 0;
-    private float maxReachFromCenterRight = 0;
+    private sealed class Hand
+    {
+        public readonly Transform root;
+        public readonly Transform target;
+        public readonly float length;
+        public readonly PunchMotion motion = new PunchMotion();
 
-    // calibration to get max reach
-    private bool isCalibratedLeft = false;
-    private bool isCalibratedRight = false;
-    private float lastDistanceLeft = 0f;
-    private float lastDistanceRight = 0f;
-    private float threshhold = 0.005f;
-    public float stepSizeLeft = 0.02f;
-    public float stepSizeRight = 0.02f;
-    private float originalStepSize = 0.02f;
+        public Hand(TwoBoneIKConstraint constraint)
+        {
+            var data = constraint.data;
+            root = data.root;
+            target = data.target;
+            length = Vector3.Distance(data.root.position, data.mid.position)
+                + Vector3.Distance(data.mid.position, data.tip.position);
+        }
+    }
 
-    ReachCalibration reachCalib;
+    private Hand leftHand;
+    private Hand rightHand;
+    private InputAction leftPunchAction;
+    private InputAction rightPunchAction;
+    private InputAction toggleModeAction;
 
-    private enum PunchType { LeftHook, RightHook, Uppercut }
+    private void Awake()
+    {
+        if (targetSpace == null || !IsArmValid(leftArmIK) || !IsArmValid(rightArmIK))
+        {
+            Debug.LogError("BoxingController requires Target Space and two complete Two Bone IK constraints.", this);
+            enabled = false;
+            return;
+        }
 
+        leftHand = new Hand(leftArmIK);
+        rightHand = new Hand(rightArmIK);
+        ResetTargets();
+
+        leftPunchAction = new InputAction("Left Punch", InputActionType.Button, "<Mouse>/leftButton");
+        rightPunchAction = new InputAction("Right Punch", InputActionType.Button, "<Mouse>/rightButton");
+        toggleModeAction = new InputAction("Boxing Mode", InputActionType.Button);
+        toggleModeAction.AddBinding("<Keyboard>/leftCtrl");
+        toggleModeAction.AddBinding("<Keyboard>/rightCtrl");
+    }
+
+    private static bool IsArmValid(TwoBoneIKConstraint constraint)
+    {
+        if (constraint == null) return false;
+        var data = constraint.data;
+        return data.root != null && data.mid != null && data.tip != null && data.target != null
+            && data.mid.IsChildOf(data.root) && data.tip.IsChildOf(data.mid);
+    }
 
     private void OnEnable()
     {
-        MoveAction.action.Enable();
-        LookPosAction.action.Enable();
-        DashAction.action.Enable();
-        LeftHookAction.action.Enable();
-        RightHookAction.action.Enable();
-        UppercutAction.action.Enable();
-
-        DashAction.action.performed += _ => Dash();
-        LeftHookAction.action.performed += _ => TriggerFight(PunchType.LeftHook);
-        RightHookAction.action.performed += _ => TriggerFight(PunchType.RightHook);
-        UppercutAction.action.performed += _ => TriggerFight(PunchType.Uppercut);
+        leftPunchAction?.Enable();
+        rightPunchAction?.Enable();
+        toggleModeAction?.Enable();
+        if (leftHand == null) return;
+        leftArmIK.weight = 1f;
+        rightArmIK.weight = 1f;
+        ResetTargets();
     }
 
     private void OnDisable()
     {
-        MoveAction.action.Disable();
-        LookPosAction.action.Disable();
-        DashAction.action.Disable();
-        LeftHookAction.action.Disable();
-        RightHookAction.action.Disable();
-        UppercutAction.action.Disable();
+        leftPunchAction?.Disable();
+        rightPunchAction?.Disable();
+        toggleModeAction?.Disable();
+        if (leftHand == null) return;
+        ResetTargets();
+        leftArmIK.weight = 0f;
+        rightArmIK.weight = 0f;
     }
 
-    void Awake()
+    private void OnDestroy()
     {
-        reachCalib = new ReachCalibration(
-            transform, leftHandTarget, rightHandTarget,
-            leftGloveTip, rightGloveTip,
-            headHeight: headHeight, startDist: 0.30f, expandStep: 0.08f, maxProbeDist: 2.0f, reachTolerance: 0.015f
-        );
-
-        float distance = DistanceToParent(leftGloveTip, leftShoulder);
-        Debug.Log("Distance Shoulder to tip "+ distance);
-    }
-
-    private void Start()
-    {
-        headHeight = head.position.y;
+        leftPunchAction?.Dispose();
+        rightPunchAction?.Dispose();
+        toggleModeAction?.Dispose();
     }
 
     private void Update()
     {
-        if (!isCalibratedLeft)
+        if (Time.deltaTime <= 0f) return;
+        if (readPlayerInput)
         {
-            CalibrateLeft();
-        //    reachCalib.Begin();
+            if (toggleModeAction.WasPressedThisFrame()) ToggleMode();
+            if (leftPunchAction.WasPressedThisFrame()) TryPunchLeft();
+            if (rightPunchAction.WasPressedThisFrame()) TryPunchRight();
         }
 
-        if (!isCalibratedRight)
-        {
-            CalibrateRight();
-            //    reachCalib.Begin();
-        }
-        //if (reachCalib.IsRunning)
-        //{
-        //    reachCalib.Tick();
-        //    return; // skip normal update while calibrating
-        //} else 
-        //{
-        //    isCalibrated = true;
-        //    maxReachFromCenterLeft = reachCalib.MaxLeft;
-        //    maxReachFromCenterRight = reachCalib.MaxRight;
-        //    Debug.Log("Calibration complete. Max Left Reach: " + maxReachFromCenterLeft + ", Max Right Reach: " + maxReachFromCenterRight);
-        //}
-
-
-        moveInput = MoveAction.action.ReadValue<Vector2>();
-        if (moveInput.sqrMagnitude < 0.01f) {
-            moveInput = Vector2.zero; 
-        }
-        else
-        {
-            moveInput = moveInput.normalized;
-        }
-
-        // Speed
-        float speed = moveSpeed;
-
-        // Movement
-        moveVector = new Vector3(moveInput.x, 0, moveInput.y);
-        Vector3 move = moveVector * speed * Time.deltaTime;
-        transform.position += move;
-        currentSpeed = move.magnitude / Time.deltaTime;
-
-        // Rotation
-        Ray ray = MainCamera.ScreenPointToRay(LookPosAction.action.ReadValue<Vector2>());
-        Plane ground = new Plane(Vector3.up, Vector3.zero);
-        if (ground.Raycast(ray, out float dist))
-        {
-            targetPoint = ray.GetPoint(dist);
-            Vector3 dir = targetPoint - transform.position;
-            dir.y = 0;
-            if (dir.sqrMagnitude > 0.01f)
-                transform.rotation = Quaternion.LookRotation(dir.normalized);
-        }
-
-        targetPoint = new Vector3(targetPoint.x, head.position.y, targetPoint.z);
-
-        // Anim Blend Tree
-        SetBlendParams(moveVector);
+        UpdateHand(leftHand, leftGuard, Time.deltaTime);
+        UpdateHand(rightHand, rightGuard, Time.deltaTime);
     }
 
-    private void SetBlendParams(Vector3 moveDirWorld)
+    public void ToggleMode()
     {
-        Vector3 moveLocal = transform.InverseTransformDirection(moveDirWorld);
-        animator.SetFloat("forwardX", moveLocal.x);
-        animator.SetFloat("forwardZ", moveLocal.z);
+        mode = mode == BoxingMode.Straight ? BoxingMode.Swing : BoxingMode.Straight;
     }
 
-    private void TriggerFight(PunchType type)
-    {
-        Debug.Log("Punch: " + type.ToString());
+    public bool TryPunchLeft() => TryPunch(leftHand, leftGuard, -1f);
+    public bool TryPunchRight() => TryPunch(rightHand, rightGuard, 1f);
 
-        if (!isPunchingLeft && !isPunchingRight)
-            StartCoroutine(PunchCoroutine(type));
+    private bool TryPunch(Hand hand, Vector3 guard, float side)
+    {
+        if (!isActiveAndEnabled || hand == null) return false;
+        GetPath(mode, guard, side, out Vector3 strike, out Vector3 control);
+        return hand.motion.Start(mode, guard, strike, control,
+            mode == BoxingMode.Straight ? straightExtensionTime : swingExtensionTime,
+            extensionHoldTime,
+            mode == BoxingMode.Straight ? straightRetractionTime : swingRetractionTime);
     }
 
-    private IEnumerator PunchCoroutine(PunchType type)
+    private void GetPath(BoxingMode punchMode, Vector3 guard, float side,
+        out Vector3 strike, out Vector3 control)
     {
-        float punchDuration = (type == PunchType.LeftHook) ? punchDurationLeft : (type == PunchType.RightHook) ? punchDurationRight : 0.3f;
-        if (type == PunchType.LeftHook)
-            isPunchingLeft = true;
-        else if (type == PunchType.RightHook)
-            isPunchingRight = true;
-        
-        switch (type)
+        float distance = punchMode == BoxingMode.Straight ? straightDistance : swingDistance;
+        strike = guard + Vector3.forward * distance;
+        if (punchMode == BoxingMode.Swing) strike.x -= side * swingInwardDistance;
+        control = (guard + strike) * 0.5f + Vector3.right * side * swingWidth;
+    }
+
+    private void UpdateHand(Hand hand, Vector3 guard, float deltaTime)
+    {
+        if (hand.motion.IsActive) hand.motion.Advance(deltaTime);
+        else hand.motion.Reset(guard);
+
+        Vector3 goal = targetSpace.TransformPoint(hand.motion.Position);
+        // Avoid a locked, fully extended elbow when a target lies beyond arm reach.
+        goal = hand.root.position + Vector3.ClampMagnitude(goal - hand.root.position, hand.length * reachLimit);
+        hand.target.position = goal;
+    }
+
+    private void ResetTargets()
+    {
+        leftHand.motion.Reset(leftGuard);
+        rightHand.motion.Reset(rightGuard);
+        UpdateHand(leftHand, leftGuard, 0f);
+        UpdateHand(rightHand, rightGuard, 0f);
+    }
+
+    private void OnGUI()
+    {
+        if (showModeLabel)
+            GUI.Box(new Rect(12f, 12f, 360f, 52f), $"Boxing: {mode}\nLMB / RMB: punch     Ctrl: change mode");
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (targetSpace == null) return;
+        DrawPath(leftGuard, -1f, Color.yellow);
+        DrawPath(rightGuard, 1f, Color.cyan);
+    }
+
+    private void DrawPath(Vector3 guard, float side, Color color)
+    {
+        GetPath(mode, guard, side, out Vector3 strike, out Vector3 control);
+        Gizmos.color = color;
+        Vector3 previous = targetSpace.TransformPoint(guard);
+        for (int i = 1; i <= 20; i++)
         {
-            case PunchType.LeftHook:
-                //animator.SetTrigger("LeftHook");
-                leftHandTarget.position = targetPoint;
-                break;
-            case PunchType.RightHook:
-                //animator.SetTrigger("RightHook");
-                rightHandTarget.position = targetPoint;
-                break;
-            case PunchType.Uppercut:
-                //animator.SetTrigger("Uppercut");
-                break;
+            Vector3 point = targetSpace.TransformPoint(PunchMotion.PointOnPath(mode, guard, strike, control, i / 20f));
+            Gizmos.DrawLine(previous, point);
+            previous = point;
         }
-
-        yield return new WaitForSeconds(punchDuration);
-        if (type == PunchType.LeftHook)
-            isPunchingLeft = false;
-        else if (type == PunchType.RightHook)
-            isPunchingRight = false;
-    }
-
-    private void Dash()
-    {
-        if (!isDashing)
-            StartCoroutine(DashCoroutine());
-    }
-
-    private IEnumerator DashCoroutine()
-    {
-        isDashing = true;
-
-        Vector3 start = transform.position;
-        Vector3 end = start + transform.forward * dashDistance;
-        float elapsed = 0f;
-
-        while (elapsed < dashDuration)
-        {
-            float t = elapsed / dashDuration;
-            transform.position = Vector3.Lerp(start, end, t);
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        transform.position = end;
-        isDashing = false;
-    }
-
-    private void CalibrateLeft()
-    {
-        var direction = transform.forward; 
-        var center = transform.position; 
-        center.y = headHeight; 
-        leftHandTarget.position = center + direction * (lastDistanceLeft); 
-        rightHandTarget.position = center + direction * (lastDistanceRight);
-        // calculate distances for left
-        float tipToTargetDistance = Vector3.Distance(leftGloveTip.position, leftHandTarget.position); 
-        float centerToTargetDistance = Vector3.Distance(center, leftHandTarget.position);
-        float centerToTipDistance = Vector3.Distance(leftGloveTip.position, center); 
-
-        Debug.Log($"Left Tip to Target: {tipToTargetDistance}, Target to Center: {centerToTargetDistance}, Tip to Center: {centerToTipDistance}, Max Reach from Center Left: {maxReachFromCenterLeft}"); 
-        if (tipToTargetDistance > threshhold) // is not reachable
-        { 
-            stepSizeLeft = stepSizeLeft / 2; 
-            lastDistanceLeft -= stepSizeLeft; 
-            if (centerToTipDistance > maxReachFromCenterLeft) 
-            { 
-                maxReachFromCenterLeft = centerToTipDistance; 
-            }
-
-            if (Mathf.Abs(centerToTargetDistance - centerToTipDistance) <= threshhold || stepSizeLeft <= originalStepSize / 32)
-            {
-                leftHandTarget.position = center + direction * maxReachFromCenterLeft;
-                isCalibratedLeft = true;
-                Debug.Log("Left Hand Calibration complete. Max Reach from Center Left: " + maxReachFromCenterLeft);
-            }
-        } else // within threshhold - means reachable
-        {
-            lastDistanceLeft += stepSizeLeft*2; 
-        }
-    }
-
-    private void CalibrateRight()
-    {
-        var direction = transform.forward;
-        var center = transform.position;
-        center.y = headHeight;
-        rightHandTarget.position = center + direction * (lastDistanceRight);
-        // calculate distances for left
-        float tipToTargetDistance = Vector3.Distance(rightGloveTip.position, rightHandTarget.position);
-        float centerToTargetDistance = Vector3.Distance(center, rightHandTarget.position);
-        float centerToTipDistance = Vector3.Distance(rightGloveTip.position, center);
-
-        Debug.Log($"Right Tip to Target: {tipToTargetDistance}, Target to Center: {centerToTargetDistance}, Tip to Center: {centerToTipDistance}, Max Reach from Center Left: {maxReachFromCenterLeft}");
-        if (tipToTargetDistance > threshhold) // is not reachable
-        {
-            stepSizeRight = stepSizeRight / 2;
-            lastDistanceRight -= stepSizeRight;
-            if (centerToTipDistance > maxReachFromCenterRight)
-            {
-                maxReachFromCenterRight = centerToTipDistance;
-            }
-
-            if (Mathf.Abs(centerToTargetDistance - centerToTipDistance) <= threshhold)
-            {
-                rightHandTarget.position = center + direction * maxReachFromCenterRight;
-                isCalibratedRight = true;
-                Debug.Log("Right Hand Calibration complete due to threshold. Max Reach from Center Left: " + maxReachFromCenterRight);
-            } else if (stepSizeRight <= originalStepSize / 64)
-            {
-                rightHandTarget.position = center + direction * maxReachFromCenterRight;
-                isCalibratedRight = true;
-                Debug.Log("Right Hand Calibration complete due to size. Max Reach from Center Left: " + maxReachFromCenterRight);
-            }
-        }
-        else // within threshhold - means reachable
-        {
-            lastDistanceRight += stepSizeRight;
-        }
-    }
-
-    public float DistanceToParent(Transform start, Transform stopAtParent)
-    {
-        float total = 0f;
-        Transform current = start;
-
-        while (current != null && current != stopAtParent)
-        {
-            Transform parent = current.parent;
-            if (parent == null) return -1f; // not a descendant
-
-            total += Vector3.Distance(current.position, parent.position);
-            current = parent;
-        }
-
-        if (current == stopAtParent) return total;
-        return -1f;
     }
 }
