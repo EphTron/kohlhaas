@@ -941,6 +941,7 @@ GameObject:
   - component: {fileID: 11002}
   - component: {fileID: 11003}
   - component: {fileID: 13001}
+  - component: {fileID: 13006}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -1266,26 +1267,98 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 847b8519a3964553875b45220b91fb3b, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::BoxingController
   targetSpace: {fileID: 721178811}
   leftArmIK: {fileID: 13002}
   rightArmIK: {fileID: 13003}
   reachLimit: 0.98
-  leftGuard: {x: -0.18, y: 1.4, z: 0.28}
-  rightGuard: {x: 0.18, y: 1.4, z: 0.28}
+  leftGuard: {x: -0.18, y: 1.28, z: 0.28}
+  rightGuard: {x: 0.18, y: 1.28, z: 0.28}
   straightDistance: 0.38
+  straightStrikeHeight: 1.4
   straightExtensionTime: 0.075
   straightRetractionTime: 0.13
-  swingDistance: 0.35
-  swingWidth: 0.3
-  swingInwardDistance: 0.25
-  swingExtensionTime: 0.12
+  swingExtensionTime: 0.16
   swingRetractionTime: 0.18
   mode: 0
   extensionHoldTime: 0.025
   readPlayerInput: 1
   showModeLabel: 1
+  swingPivot: {x: -0.1, y: 1.4, z: 0.04}
+  swingRadius: 0.48
+  swingStartAngle: -105
+  swingSweepAngle: 125
+  swingWindupTime: 0.07
+  leftElbowHint: {x: -0.28, y: 0.9, z: 0.04}
+  rightElbowHint: {x: 0.28, y: 0.9, z: 0.04}
+  leftPunchElbowHint: {x: -0.55, y: 1.1, z: -0.12}
+  rightPunchElbowHint: {x: 0.55, y: 1.1, z: -0.12}
+  gloveForwardAxis: {x: 0, y: 1, z: 0}
+  wristAlignmentWeight: 1
+  leftWristRotationOffset: {x: 0, y: 0, z: 0}
+  rightWristRotationOffset: {x: 0, y: 0, z: 0}
+  leftThumbAxis: {x: 1, y: 0, z: 0}
+  rightThumbAxis: {x: -1, y: 0, z: 0}
+  guardThumbInwardWeight: 1
+  leftPunchAction:
+    m_Name: Left Punch
+    m_Type: 1
+    m_ExpectedControlType: Button
+    m_Id: 12858066-b8a9-4397-855b-f386f86e7ac7
+    m_Processors:
+    m_Interactions:
+    m_SingletonActionBindings:
+    - m_Name:
+      m_Id: b01213d6-16f8-49ec-bb76-8e1f3c065374
+      m_Path: <Mouse>/leftButton
+      m_Interactions:
+      m_Processors:
+      m_Groups:
+      m_Action: Left Punch
+      m_Flags: 0
+    m_Flags: 0
+  rightPunchAction:
+    m_Name: Right Punch
+    m_Type: 1
+    m_ExpectedControlType: Button
+    m_Id: cacaf15c-446d-4c75-93f3-64994a51cdef
+    m_Processors:
+    m_Interactions:
+    m_SingletonActionBindings:
+    - m_Name:
+      m_Id: eac033c1-268d-40db-a32a-06ca6caef362
+      m_Path: <Mouse>/rightButton
+      m_Interactions:
+      m_Processors:
+      m_Groups:
+      m_Action: Right Punch
+      m_Flags: 0
+    m_Flags: 0
+  toggleModeAction:
+    m_Name: Change Mode
+    m_Type: 1
+    m_ExpectedControlType: Button
+    m_Id: 838efd17-4544-437d-94c7-9f5efc615e17
+    m_Processors:
+    m_Interactions:
+    m_SingletonActionBindings:
+    - m_Name:
+      m_Id: 89c12fb7-4ebd-4182-b402-e429023c9598
+      m_Path: <Keyboard>/ctrl
+      m_Interactions:
+      m_Processors:
+      m_Groups:
+      m_Action: Change Mode
+      m_Flags: 0
+    m_Flags: 0
+  hitLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  gloveHitRadius: 0.11
+  gloveContactOffset: 0.14
+  straightImpulse: 4.5
+  swingImpulse: 6
 --- !u!114 &13002
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3301,6 +3374,89 @@ Transform:
   - {fileID: 1349867940}
   m_Father: {fileID: 355147740}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1001 &14000
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 200001, guid: 3fcde58ee38e4096b193c7fc0b3e0457, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 200001, guid: 3fcde58ee38e4096b193c7fc0b3e0457, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 1.45
+      objectReference: {fileID: 0}
+    - target: {fileID: 200001, guid: 3fcde58ee38e4096b193c7fc0b3e0457, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 3fcde58ee38e4096b193c7fc0b3e0457, type: 3}
+--- !u!4 &14001 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 200001, guid: 3fcde58ee38e4096b193c7fc0b3e0457, type: 3}
+  m_PrefabInstance: {fileID: 14000}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &13006
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 11000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3f9599e9dea04785aa372a622f23aee6, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::BoxingStanceController
+  animator: {fileID: 721178807}
+  stance: 0
+  showStanceLabel: 1
+  leftTap:
+    m_Name: Left Stance Tap
+    m_Type: 1
+    m_ExpectedControlType: Button
+    m_Id: f09c047b-be35-4280-a386-5df2573d9395
+    m_Processors:
+    m_Interactions:
+    m_SingletonActionBindings:
+    - m_Name:
+      m_Id: 8778cbb5-34cd-4e3f-adc8-4c32fe5111a4
+      m_Path: <Keyboard>/a
+      m_Interactions:
+      m_Processors:
+      m_Groups:
+      m_Action: Left Stance Tap
+      m_Flags: 0
+    m_Flags: 0
+  rightTap:
+    m_Name: Right Stance Tap
+    m_Type: 1
+    m_ExpectedControlType: Button
+    m_Id: 6f44d1ef-447f-4bf8-8db8-4494700b176d
+    m_Processors:
+    m_Interactions:
+    m_SingletonActionBindings:
+    - m_Name:
+      m_Id: 6229c2c3-ef58-494a-a8af-aad198b149b8
+      m_Path: <Keyboard>/d
+      m_Interactions:
+      m_Processors:
+      m_Groups:
+      m_Action: Right Stance Tap
+      m_Flags: 0
+    m_Flags: 0
+  maximumTapGap: 0.22
+  maximumSequenceTime: 0.5
+  switchCooldown: 0.3
+  readPlayerInput: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -3311,3 +3467,4 @@ SceneRoots:
   - {fileID: 11001}
   - {fileID: 12001}
   - {fileID: 12101}
+  - {fileID: 14001}
