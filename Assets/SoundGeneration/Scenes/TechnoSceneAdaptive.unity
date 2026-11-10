@@ -2388,6 +2388,14 @@ MonoBehaviour:
   pitchRadius: 8
   pitchRangeSemitones: 0.5
   pitchSmoothing: 0.5
+  breakClips:
+  - {fileID: 8300000, guid: 4d6484867ae96f749b8b72ddc2f286eb, type: 3}
+  - {fileID: 8300000, guid: 339dbf7ed853cb7479d8bad17b1cc4ae, type: 3}
+  padClip: {fileID: 8300000, guid: 0dd7a0c98824cda46b21af8c343d0642, type: 3}
+  breakGain: 0.55
+  padGain: 0.18
+  padTransposeSemitones: 0
+  useOriginalVocals: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

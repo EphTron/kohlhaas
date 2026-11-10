@@ -9,11 +9,17 @@ public sealed class BoxingStanceController : MonoBehaviour
 {
     [Header("References")]
     [SerializeField] private Animator animator;
+    [Tooltip("The child model containing the Animator and rig, separate from the Player movement root.")]
+    [SerializeField] private Transform visualRoot;
 
     [Header("Stance")]
     [Tooltip("Orthodox: left foot forward. Southpaw: right foot forward.")]
     [SerializeField] private BoxingStance stance = BoxingStance.Orthodox;
     [SerializeField] private bool showStanceLabel = true;
+
+    [Header("Stance Switch Hop")]
+    [SerializeField, Min(0f)] private float hopHeight = 0.12f;
+    [SerializeField, Min(0.12f)] private float hopDuration = 0.28f;
 
     [Header("Switch Gesture (left-right-left or right-left-right)")]
     [SerializeField] private InputAction leftTap = new InputAction("Left Stance Tap", InputActionType.Button, "<Keyboard>/a");
@@ -26,17 +32,29 @@ public sealed class BoxingStanceController : MonoBehaviour
     [SerializeField] private bool readPlayerInput = true;
 
     public BoxingStance Stance => stance;
+    public bool IsSwitching => isHopping;
 
     private static readonly int RightFootForward = Animator.StringToHash("rightFootForward");
     private static readonly int ForwardX = Animator.StringToHash("forwardX");
     private static readonly int MirroredForwardX = Animator.StringToHash("mirroredForwardX");
+    private static readonly int OrthodoxState = Animator.StringToHash("Base Layer.Movement");
+    private static readonly int SouthpawState = Animator.StringToHash("Base Layer.MovementSouthpaw");
     private int tapCount;
     private int previousSide;
     private double sequenceStart, previousTap;
     private double lastSwitch = double.NegativeInfinity;
     private bool controllerReady;
+    private bool needsInitialPose = true;
+    private bool isHopping, swapStarted;
+    private float hopElapsed, activeHopDuration, activeHopHeight;
+    private Vector3 visualRestPosition;
+    private BoxingStance appliedStance, hopDestination;
 
-    private void Reset() => animator = GetComponentInChildren<Animator>();
+    private void Reset()
+    {
+        animator = GetComponentInChildren<Animator>();
+        if (animator != null) visualRoot = animator.transform;
+    }
 
     private void Awake()
     {
@@ -47,10 +65,18 @@ public sealed class BoxingStanceController : MonoBehaviour
             enabled = false;
             return;
         }
+        if (visualRoot == null) visualRoot = animator.transform;
+        if (visualRoot == transform || !visualRoot.IsChildOf(transform)
+            || !animator.transform.IsChildOf(visualRoot))
+        {
+            Debug.LogError("BoxingStanceController Visual Root must be the child model containing the Animator and rig.", this);
+            enabled = false;
+            return;
+        }
+        visualRestPosition = visualRoot.localPosition;
         controllerReady = true;
         leftTap.performed += OnLeftTap;
         rightTap.performed += OnRightTap;
-        ApplyStance();
     }
 
     private bool HasRequiredParameters()
@@ -70,7 +96,7 @@ public sealed class BoxingStanceController : MonoBehaviour
         ResetSequence();
         leftTap?.Enable();
         rightTap?.Enable();
-        ApplyStance();
+        needsInitialPose = true;
     }
 
     private void OnDisable()
@@ -78,6 +104,8 @@ public sealed class BoxingStanceController : MonoBehaviour
         leftTap?.Disable();
         rightTap?.Disable();
         ResetSequence();
+        isHopping = false;
+        if (controllerReady) SetVisualHeight(0f);
     }
 
     private void OnDestroy()
@@ -102,7 +130,18 @@ public sealed class BoxingStanceController : MonoBehaviour
         // Mirroring swaps left/right animation motion as well as the feet.
         // A separate parameter keeps both blend trees correct during the crossfade.
         animator.SetFloat(MirroredForwardX, -animator.GetFloat(ForwardX));
-        ApplyStance();
+        if (needsInitialPose)
+        {
+            // Initial load / re-enable should begin planted in the selected stance.
+            appliedStance = stance;
+            animator.Play(StateHash(stance), 0, 0f);
+            animator.SetBool(RightFootForward, stance == BoxingStance.Southpaw);
+            SetVisualHeight(0f);
+            needsInitialPose = false;
+            return;
+        }
+        if (!isHopping && stance != appliedStance) BeginHop();
+        if (isHopping) UpdateHop(Time.deltaTime);
     }
 
     private void OnLeftTap(InputAction.CallbackContext context) => RecordTap(-1, context.time);
@@ -115,7 +154,7 @@ public sealed class BoxingStanceController : MonoBehaviour
             ResetSequence();
             return;
         }
-        if (timestamp - lastSwitch < switchCooldown) return;
+        if (isHopping || timestamp - lastSwitch < switchCooldown) return;
         if (tapCount == 0 || timestamp - previousTap > maximumTapGap
             || timestamp - sequenceStart > maximumSequenceTime || side == previousSide)
         {
@@ -141,13 +180,59 @@ public sealed class BoxingStanceController : MonoBehaviour
     {
         stance = newStance;
         ResetSequence();
-        ApplyStance();
     }
 
-    private void ApplyStance()
+    private static int StateHash(BoxingStance value) => value == BoxingStance.Southpaw ? SouthpawState : OrthodoxState;
+
+    private void BeginHop()
     {
-        if (controllerReady && animator != null)
-            animator.SetBool(RightFootForward, stance == BoxingStance.Southpaw);
+        isHopping = true;
+        swapStarted = false;
+        hopElapsed = 0f;
+        activeHopDuration = Mathf.Max(0.12f, hopDuration);
+        activeHopHeight = Mathf.Max(0f, hopHeight);
+        hopDestination = stance;
+    }
+
+    private void UpdateHop(float deltaTime)
+    {
+        hopElapsed += deltaTime;
+        float t = Mathf.Clamp01(hopElapsed / activeHopDuration);
+        // Ballistic-looking rise and fall: zero offset at takeoff and landing.
+        SetVisualHeight(4f * activeHopHeight * t * (1f - t));
+
+        if (!swapStarted && t >= 0.12f)
+        {
+            swapStarted = true;
+            appliedStance = hopDestination;
+            animator.SetBool(RightFootForward, appliedStance == BoxingStance.Southpaw);
+            if (t >= 1f)
+            {
+                // A stalled frame must still finish in the correct planted stance.
+                animator.Play(StateHash(appliedStance), 0, 0f);
+            }
+            else
+            {
+                // Swap after takeoff and finish before landing. Code owns the
+                // crossfade so its duration follows the adjustable hop duration.
+                float blendTime = Mathf.Min(activeHopDuration * 0.68f, activeHopDuration - hopElapsed);
+                animator.CrossFadeInFixedTime(StateHash(appliedStance), blendTime, 0, 0f);
+            }
+        }
+        if (t >= 1f)
+        {
+            isHopping = false;
+            SetVisualHeight(0f);
+        }
+    }
+
+    private void SetVisualHeight(float height)
+    {
+        if (visualRoot == null) return;
+        Vector3 localOffset = visualRoot.parent != null
+            ? visualRoot.parent.InverseTransformVector(Vector3.up * height) : Vector3.up * height;
+        // Moving the model also moves the arm rig and targets before BoxingController.Update.
+        visualRoot.localPosition = visualRestPosition + localOffset;
     }
 
     private void ResetSequence()
