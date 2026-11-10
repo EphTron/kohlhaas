@@ -136,7 +136,9 @@ public sealed class PunchingBag : MonoBehaviour, IPunchHitReceiver
         lastHit = hit;
         HitCount++;
         flash = flashDuration;
-        speaker.pitch = hit.Mode == BoxingMode.Swing ? 0.85f : 1.05f;
+        speaker.pitch = (hit.Mode == BoxingMode.Swing ? 0.9f : 1.05f)
+            * (hit.Kind == PunchKind.Push ? 0.75f : hit.Kind == PunchKind.Power ? 0.85f
+                : hit.Kind == PunchKind.Uppercut ? 0.95f : 1.05f);
         speaker.PlayOneShot(impactSound, volume);
         HitReceived?.Invoke(hit);
     }
@@ -157,7 +159,7 @@ public sealed class PunchingBag : MonoBehaviour, IPunchHitReceiver
     private void OnGUI()
     {
         if (!showHitStats) return;
-        string last = HitCount == 0 ? "Land a punch to test contact" : $"Last: {lastHit.Mode} | Impulse: {lastHit.Impulse * impulseMultiplier:0.0} N s";
+        string last = HitCount == 0 ? "Land a punch to test contact" : $"Last: {lastHit.Kind} {lastHit.Mode} | Impulse: {lastHit.Impulse * impulseMultiplier:0.0} N s";
         GUI.Box(new Rect(12f, 92f, 400f, 72f), $"Punching bag | Hits: {HitCount}\n{last}\n{resetBagAction.GetBindingDisplayString()}: reset bag");
     }
 

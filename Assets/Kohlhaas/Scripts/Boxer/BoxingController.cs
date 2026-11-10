@@ -1,6 +1,9 @@
 using UnityEngine;
 using UnityEngine.Animations.Rigging;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.LowLevel;
+using System.Collections.Generic;
+using UnityEngine.Serialization;
 
 [DisallowMultipleComponent]
 [DefaultExecutionOrder(-50)]
@@ -11,6 +14,9 @@ public sealed class BoxingController : MonoBehaviour
     [SerializeField] private Transform targetSpace;
     [SerializeField] private TwoBoneIKConstraint leftArmIK;
     [SerializeField] private TwoBoneIKConstraint rightArmIK;
+    [SerializeField] private BoxingStanceController stanceController;
+    [Tooltip("Additive chest rotation in a RigBuilder layer evaluated before the arm IK.")]
+    [SerializeField] private OverrideTransform torsoTwist;
     [SerializeField, Range(0.5f, 1f)] private float reachLimit = 0.98f;
 
     [Header("Guard and Elbows (relative to Target Space)")]
@@ -37,6 +43,61 @@ public sealed class BoxingController : MonoBehaviour
     [Tooltip("Roll gloves inward in guard; blend back to punch alignment during a strike.")]
     [SerializeField, Range(0f, 1f)] private float guardThumbInwardWeight = 1f;
 
+    [Header("Light Punch — Either Hand")]
+    [SerializeField] private PunchProfile leadPunch = new PunchProfile
+    {
+        reachMultiplier = 0.78f, extensionTimeMultiplier = 0.8f,
+        recoveryTimeMultiplier = 0.85f, impulseMultiplier = 0.65f
+    };
+
+    [Header("Lead-Lead-Rear Combo Finisher")]
+    [SerializeField] private PunchProfile rearPunch = new PunchProfile
+    {
+        windupTime = 0.1f, pullbackDistance = 0.13f, outwardDraw = 0.035f,
+        reachMultiplier = 1.08f, extensionTimeMultiplier = 1.05f,
+        recoveryTimeMultiplier = 1.3f, impulseMultiplier = 1.65f,
+        torsoWindupAngle = 12f, torsoStrikeAngle = 18f
+    };
+
+    [Header("Space-Click Uppercut")]
+    [FormerlySerializedAs("hookPunch")]
+    [SerializeField] private PunchProfile uppercutPunch = new PunchProfile
+    {
+        reachMultiplier = 1f, extensionTimeMultiplier = 0.8f,
+        recoveryTimeMultiplier = 1f, impulseMultiplier = 1.1f,
+        torsoWindupAngle = 6f, torsoStrikeAngle = 10f
+    };
+    [Tooltip("Hand dip relative to the normal guard, before the rising strike.")]
+    [SerializeField] private Vector3 uppercutDipOffset = new Vector3(0f, -0.24f, -0.1f);
+    [SerializeField] private Vector3 uppercutStrikeOffset = new Vector3(0f, 0.34f, 0.19f);
+    [Tooltip("Control point of the rising arc, relative to guard. Keep X near zero for an upward strike.")]
+    [SerializeField] private Vector3 uppercutControlOffset = new Vector3(0f, -0.22f, 0.23f);
+    [SerializeField, Min(0.01f)] private float uppercutWindupTime = 0.09f;
+    [SerializeField, Min(0.01f)] private float uppercutExtensionTime = 0.12f;
+    [SerializeField, Min(0.01f)] private float uppercutRecoveryTime = 0.18f;
+    [SerializeField, Min(0f)] private float uppercutImpulse = 6.5f;
+
+    [Header("Input Patterns")]
+    [Tooltip("Wait this long for the other held mouse button before firing a single punch.")]
+    [SerializeField, Range(0.01f, 0.12f)] private float simultaneousWindow = 0.045f;
+    [FormerlySerializedAs("hookInputWindow")]
+    [SerializeField, Range(0.05f, 0.5f)] private float uppercutInputWindow = 0.22f;
+    [SerializeField, Min(0.1f)] private float comboTapGap = 0.45f;
+    [SerializeField, Min(0.2f)] private float comboDuration = 0.9f;
+    [SerializeField, Min(0.1f)] private float punchBufferTime = 0.65f;
+
+    [Header("Two-Hand Push — Straight Mode")]
+    [SerializeField, Min(0.05f)] private float pushDistance = 0.38f;
+    [SerializeField] private float pushHeight = 1.22f;
+    [SerializeField, Min(0.01f)] private float pushExtensionTime = 0.12f;
+    [SerializeField, Min(0.01f)] private float pushRecoveryTime = 0.2f;
+    [SerializeField, Min(0f)] private float pushImpulse = 10f;
+
+    [Header("Raised Guard — Swing Mode")]
+    [SerializeField] private Vector3 raisedLeftGuard = new Vector3(-0.16f, 1.48f, 0.26f);
+    [SerializeField] private Vector3 raisedRightGuard = new Vector3(0.16f, 1.48f, 0.26f);
+    [SerializeField, Min(0.01f)] private float guardBlendTime = 0.12f;
+
     [Header("Straight Punch")]
     [SerializeField, Min(0f)] private float straightDistance = 0.38f;
     [Tooltip("Punch height stays independent of the lower defensive guard.")]
@@ -57,6 +118,8 @@ public sealed class BoxingController : MonoBehaviour
     [SerializeField] private InputAction leftPunchAction = new InputAction("Left Punch", InputActionType.Button, "<Mouse>/leftButton");
     [SerializeField] private InputAction rightPunchAction = new InputAction("Right Punch", InputActionType.Button, "<Mouse>/rightButton");
     [SerializeField] private InputAction toggleModeAction = new InputAction("Change Mode", InputActionType.Button, "<Keyboard>/ctrl");
+    [FormerlySerializedAs("hookAction")]
+    [SerializeField] private InputAction uppercutAction = new InputAction("Prime Uppercut", InputActionType.Button, "<Keyboard>/space");
     [SerializeField] private BoxingMode mode = BoxingMode.Straight;
     [SerializeField, Min(0f)] private float extensionHoldTime = 0.025f;
     [SerializeField] private bool readPlayerInput = true;
@@ -73,6 +136,7 @@ public sealed class BoxingController : MonoBehaviour
     public BoxingMode Mode => mode;
     public bool IsPunchingLeft => leftHand != null && leftHand.motion.IsActive;
     public bool IsPunchingRight => rightHand != null && rightHand.motion.IsActive;
+    public bool IsGuarding => raisedGuardHeld;
 
     private sealed class Hand
     {
@@ -82,6 +146,8 @@ public sealed class BoxingController : MonoBehaviour
         public readonly PunchMotion motion = new PunchMotion();
         public Vector3 previousContact;
         public bool hasHit;
+        public PunchKind kind;
+        public float impulse;
 
         public Hand(TwoBoneIKConstraint constraint, Vector3 gloveForward, SkinnedMeshRenderer[] skins)
         {
@@ -114,6 +180,13 @@ public sealed class BoxingController : MonoBehaviour
     }
 
     private Hand leftHand, rightHand;
+    private Hand torsoOwner;
+    private readonly BoxingInputBuffer inputBuffer = new BoxingInputBuffer();
+    private readonly Queue<BoxingCommand> pendingStrikes = new Queue<BoxingCommand>();
+    private readonly HashSet<IPunchHitReceiver> pushReceivers = new HashSet<IPunchHitReceiver>();
+    private bool acceptInput, raisedGuardHeld, defensiveBlendActive;
+    private float defensiveBlendElapsed, currentTorsoYaw;
+    private Vector3 leftDefensiveStart, rightDefensiveStart;
     private readonly RaycastHit[] sweepHits = new RaycastHit[32];
     private readonly Collider[] overlaps = new Collider[32];
 
@@ -129,8 +202,25 @@ public sealed class BoxingController : MonoBehaviour
         var skins = targetSpace.GetComponentsInChildren<SkinnedMeshRenderer>(true);
         leftHand = new Hand(leftArmIK, gloveForwardAxis, skins);
         rightHand = new Hand(rightArmIK, gloveForwardAxis, skins);
+        if (stanceController == null) stanceController = GetComponent<BoxingStanceController>();
+        if (torsoTwist != null)
+        {
+            var torsoData = torsoTwist.data;
+            torsoData.space = OverrideTransformData.Space.Pivot;
+            torsoData.sourceObject = null;
+            torsoData.positionWeight = 0f;
+            torsoData.rotationWeight = 1f;
+            torsoTwist.data = torsoData;
+        }
+        else Debug.LogWarning("Assign a torso Override Transform to enable rear-punch shoulder rotation.", this);
         ConfigurePositionIK(leftArmIK);
         ConfigurePositionIK(rightArmIK);
+        ConfigureInputWindows();
+        leftPunchAction.performed += OnLeftPress;
+        leftPunchAction.canceled += OnLeftRelease;
+        rightPunchAction.performed += OnRightPress;
+        rightPunchAction.canceled += OnRightRelease;
+        uppercutAction.performed += OnUppercutPress;
         ResetTargets();
     }
 
@@ -154,7 +244,9 @@ public sealed class BoxingController : MonoBehaviour
 
     private void OnEnable()
     {
+        acceptInput = true;
         leftPunchAction?.Enable(); rightPunchAction?.Enable(); toggleModeAction?.Enable();
+        uppercutAction?.Enable();
         if (leftHand == null) return;
         leftArmIK.weight = rightArmIK.weight = 1f;
         ResetTargets();
@@ -162,7 +254,9 @@ public sealed class BoxingController : MonoBehaviour
 
     private void OnDisable()
     {
+        acceptInput = false;
         leftPunchAction?.Disable(); rightPunchAction?.Disable(); toggleModeAction?.Disable();
+        uppercutAction?.Disable();
         if (leftHand == null) return;
         ResetTargets();
         leftArmIK.weight = rightArmIK.weight = 0f;
@@ -171,19 +265,73 @@ public sealed class BoxingController : MonoBehaviour
     private void OnDestroy()
     {
         leftPunchAction?.Dispose(); rightPunchAction?.Dispose(); toggleModeAction?.Dispose();
+        uppercutAction?.Dispose();
+    }
+
+    private BoxingStance CurrentStance => stanceController != null ? stanceController.Stance : BoxingStance.Orthodox;
+    private bool CanReadInput => acceptInput && readPlayerInput && Time.timeScale > 0f && leftHand != null;
+    private void OnLeftPress(InputAction.CallbackContext context) { if (CanReadInput) inputBuffer.Press(-1, context.time, mode, CurrentStance); }
+    private void OnRightPress(InputAction.CallbackContext context) { if (CanReadInput) inputBuffer.Press(1, context.time, mode, CurrentStance); }
+    private void OnLeftRelease(InputAction.CallbackContext context) { if (CanReadInput) inputBuffer.Release(-1, context.time); }
+    private void OnRightRelease(InputAction.CallbackContext context) { if (CanReadInput) inputBuffer.Release(1, context.time); }
+    private void OnUppercutPress(InputAction.CallbackContext context) { if (CanReadInput) inputBuffer.ArmUppercut(context.time); }
+
+    private void ConfigureInputWindows()
+    {
+        inputBuffer.SimultaneousWindow = simultaneousWindow;
+        inputBuffer.UppercutWindow = uppercutInputWindow;
+        inputBuffer.ComboGap = comboTapGap;
+        inputBuffer.ComboDuration = comboDuration;
+    }
+
+    private void OnApplicationFocus(bool focused)
+    {
+        if (!focused && leftHand != null)
+        {
+            inputBuffer.Clear();
+            pendingStrikes.Clear();
+            SetRaisedGuard(false);
+        }
     }
 
     private void Update()
     {
-        if (Time.deltaTime <= 0f) return;
+        if (Time.deltaTime <= 0f)
+        {
+            inputBuffer.Clear();
+            pendingStrikes.Clear();
+            SetRaisedGuard(false);
+            return;
+        }
+        ConfigureInputWindows();
         if (readPlayerInput)
         {
             if (toggleModeAction.WasPressedThisFrame()) ToggleMode();
-            if (leftPunchAction.WasPressedThisFrame()) TryPunchLeft();
-            if (rightPunchAction.WasPressedThisFrame()) TryPunchRight();
+            inputBuffer.Advance(InputState.currentTime);
+            while (inputBuffer.TryDequeue(out BoxingCommand command))
+            {
+                if (command.Type == BoxingCommandType.Push)
+                {
+                    pendingStrikes.Clear();
+                    BeginPush();
+                }
+                else if (command.Type == BoxingCommandType.GuardStart) SetRaisedGuard(true);
+                else if (command.Type == BoxingCommandType.GuardEnd) SetRaisedGuard(false);
+                else if (pendingStrikes.Count < 4 && !raisedGuardHeld) pendingStrikes.Enqueue(command);
+                else inputBuffer.ResetCombo();
+            }
+        }
+        if (defensiveBlendActive)
+        {
+            defensiveBlendElapsed += Time.deltaTime;
+            if (defensiveBlendElapsed >= guardBlendTime) defensiveBlendActive = false;
         }
         UpdateHand(leftHand, leftGuard, leftElbowHint, leftPunchElbowHint, Time.deltaTime);
         UpdateHand(rightHand, rightGuard, rightElbowHint, rightPunchElbowHint, Time.deltaTime);
+        if (torsoOwner != null && !torsoOwner.motion.IsActive) torsoOwner = null;
+        SetTorsoYaw(torsoOwner != null ? torsoOwner.motion.TorsoYaw
+            : Mathf.MoveTowards(currentTorsoYaw, 0f, 360f * Time.deltaTime));
+        StartBufferedStrike(InputState.currentTime);
     }
 
     // Animator and Animation Rigging have evaluated the actual glove bones by LateUpdate.
@@ -196,32 +344,121 @@ public sealed class BoxingController : MonoBehaviour
         DetectHit(rightHand);
     }
 
-    public void ToggleMode() => mode = mode == BoxingMode.Straight ? BoxingMode.Swing : BoxingMode.Straight;
-    public bool TryPunchLeft() => TryPunch(leftHand, leftGuard, -1f);
-    public bool TryPunchRight() => TryPunch(rightHand, rightGuard, 1f);
-
-    private bool TryPunch(Hand hand, Vector3 guard, float side)
+    public void ToggleMode()
     {
-        if (!isActiveAndEnabled || hand == null || hand.motion.IsActive) return false;
+        mode = mode == BoxingMode.Straight ? BoxingMode.Swing : BoxingMode.Straight;
+        inputBuffer.ResetCombo();
+    }
+    public bool TryPunchLeft() => TryStrike(leftHand, leftGuard, -1f, PunchKind.Jab, mode);
+    public bool TryPunchRight() => TryStrike(rightHand, rightGuard, 1f, PunchKind.Jab, mode);
+
+    private void StartBufferedStrike(double now)
+    {
+        if (raisedGuardHeld || defensiveBlendActive || IsPunchingLeft || IsPunchingRight) return;
+        while (pendingStrikes.Count > 0)
+        {
+            BoxingCommand command = pendingStrikes.Dequeue();
+            if (now - command.Time > punchBufferTime) continue;
+            PunchKind kind = command.Kind;
+            if (kind == PunchKind.Power && command.Stance != CurrentStance) kind = PunchKind.Jab;
+            bool left = command.Side < 0;
+            TryStrike(left ? leftHand : rightHand, left ? leftGuard : rightGuard, command.Side, kind, command.Mode);
+            break;
+        }
+    }
+
+    private bool TryStrike(Hand hand, Vector3 guard, float side, PunchKind kind, BoxingMode shape)
+    {
+        if (!isActiveAndEnabled || hand == null || raisedGuardHeld || IsPunchingLeft || IsPunchingRight) return false;
+        defensiveBlendActive = false;
+        bool isUppercut = kind == PunchKind.Uppercut;
+        bool drivesTorso = kind == PunchKind.Power || isUppercut;
+        PunchProfile profile = kind == PunchKind.Power ? rearPunch : isUppercut ? uppercutPunch : leadPunch;
         GetCircle(side, out Vector3 pivot, out float angle, out float sweep);
-        float radius = FittedRadius(hand.root.position, hand.upperLength + hand.lowerLength, pivot);
-        bool started = hand.motion.Start(mode, guard, StraightStrike(guard),
-            pivot, radius, angle, sweep, swingWindupTime,
-            mode == BoxingMode.Straight ? straightExtensionTime : swingExtensionTime,
-            extensionHoldTime, mode == BoxingMode.Straight ? straightRetractionTime : swingRetractionTime);
+        float radius = FittedRadius(hand.root.position, hand.upperLength + hand.lowerLength,
+            pivot, swingRadius * Mathf.Max(0.1f, profile.reachMultiplier));
+        Vector3 drawnBack = guard + new Vector3(side * profile.outwardDraw, 0f, -profile.pullbackDistance);
+        Vector3 strike = StraightStrike(guard, profile);
+        Vector3? uppercutControl = null;
+        if (isUppercut)
+        {
+            drawnBack = guard + MirrorOffset(uppercutDipOffset, side);
+            strike = guard + MirrorOffset(uppercutStrikeOffset, side) * Mathf.Max(0.1f, profile.reachMultiplier);
+            uppercutControl = guard + MirrorOffset(uppercutControlOffset, side);
+        }
+        float windup = Mathf.Max(0f, profile.windupTime)
+            + (isUppercut ? uppercutWindupTime : shape == BoxingMode.Swing ? swingWindupTime : 0f);
+        float extensionTime = isUppercut ? uppercutExtensionTime : shape == BoxingMode.Straight ? straightExtensionTime : swingExtensionTime;
+        float recoveryTime = isUppercut ? uppercutRecoveryTime : shape == BoxingMode.Straight ? straightRetractionTime : swingRetractionTime;
+        bool started = hand.motion.Start(shape, guard, strike, drawnBack,
+            pivot, radius, angle, sweep, windup,
+            extensionTime * Mathf.Max(0.1f, profile.extensionTimeMultiplier),
+            extensionHoldTime,
+            recoveryTime * Mathf.Max(0.1f, profile.recoveryTimeMultiplier),
+            drivesTorso ? side * profile.torsoWindupAngle : 0f,
+            drivesTorso ? -side * profile.torsoStrikeAngle : 0f,
+            uppercutControl: uppercutControl);
         if (started)
         {
             hand.hasHit = false;
             hand.previousContact = ContactPosition(hand);
+            hand.kind = kind;
+            hand.impulse = (isUppercut ? uppercutImpulse : shape == BoxingMode.Straight ? straightImpulse : swingImpulse)
+                * Mathf.Max(0f, profile.impulseMultiplier);
+            if (drivesTorso) torsoOwner = hand;
         }
         return started;
     }
 
-    private float FittedRadius(Vector3 shoulder, float armLength, Vector3 pivot)
+    private static Vector3 MirrorOffset(Vector3 offset, float side) => new Vector3(offset.x * side, offset.y, offset.z);
+
+    private void BeginPush()
+    {
+        raisedGuardHeld = defensiveBlendActive = false;
+        torsoOwner = null;
+        pushReceivers.Clear();
+        StartPushHand(leftHand, leftGuard, -1f);
+        StartPushHand(rightHand, rightGuard, 1f);
+    }
+
+    private void StartPushHand(Hand hand, Vector3 guard, float side)
+    {
+        Vector3 start = targetSpace.InverseTransformPoint(hand.target.position);
+        hand.motion.Reset(start);
+        Vector3 end = new Vector3(guard.x + side * 0.04f, pushHeight, guard.z + pushDistance);
+        hand.motion.Start(BoxingMode.Straight, start, end, start, Vector3.zero, 0f, 0f, 0f,
+            0f, pushExtensionTime, 0.04f, pushRecoveryTime, 0f, 0f, guard);
+        hand.kind = PunchKind.Push;
+        hand.impulse = pushImpulse;
+        hand.hasHit = false;
+        hand.previousContact = ContactPosition(hand);
+    }
+
+    public void SetRaisedGuard(bool active)
+    {
+        if (leftHand == null || raisedGuardHeld == active) return;
+        leftDefensiveStart = targetSpace.InverseTransformPoint(leftHand.target.position);
+        rightDefensiveStart = targetSpace.InverseTransformPoint(rightHand.target.position);
+        pendingStrikes.Clear();
+        leftHand.motion.Reset(leftGuard);
+        rightHand.motion.Reset(rightGuard);
+        torsoOwner = null;
+        raisedGuardHeld = active;
+        defensiveBlendActive = true;
+        defensiveBlendElapsed = 0f;
+    }
+
+    private bool IsLeadHand(float side)
+    {
+        bool southpaw = stanceController != null && stanceController.Stance == BoxingStance.Southpaw;
+        return side < 0f ? !southpaw : southpaw;
+    }
+
+    private float FittedRadius(Vector3 shoulder, float armLength, Vector3 pivot, float requestedRadius)
     {
         // Fit the whole circle once, preserving its shape instead of clipping each point.
         float available = armLength * reachLimit - Vector3.Distance(shoulder, targetSpace.TransformPoint(pivot));
-        return Mathf.Min(swingRadius, Mathf.Max(0.01f, available / Mathf.Max(0.001f, Mathf.Abs(targetSpace.lossyScale.x))));
+        return Mathf.Min(requestedRadius, Mathf.Max(0.01f, available / Mathf.Max(0.001f, Mathf.Abs(targetSpace.lossyScale.x))));
     }
 
     private void GetCircle(float side, out Vector3 pivot, out float angle, out float sweep)
@@ -232,13 +469,32 @@ public sealed class BoxingController : MonoBehaviour
         sweep = swingSweepAngle * -side;
     }
 
-    private Vector3 StraightStrike(Vector3 guard) => new Vector3(guard.x, straightStrikeHeight, guard.z + straightDistance);
+    private Vector3 StraightStrike(Vector3 guard, PunchProfile profile) => new Vector3(guard.x,
+        straightStrikeHeight, guard.z + straightDistance * Mathf.Max(0.1f, profile.reachMultiplier));
+
+    private void SetTorsoYaw(float yaw)
+    {
+        currentTorsoYaw = yaw;
+        if (torsoTwist == null) return;
+        var data = torsoTwist.data;
+        // Pivot mode adds to the Animator pose instead of replacing its stance.
+        data.rotation = new Vector3(0f, yaw, 0f);
+        torsoTwist.data = data;
+    }
 
     private void UpdateHand(Hand hand, Vector3 guard, Vector3 elbowHint, Vector3 punchElbowHint, float deltaTime)
     {
         hand.motion.Advance(deltaTime);
         if (!hand.motion.IsActive && !hand.motion.AttackedThisStep) hand.motion.Reset(guard);
-        Vector3 goal = targetSpace.TransformPoint(hand.motion.Position);
+        Vector3 localGoal = hand.motion.Position;
+        if (!hand.motion.IsActive && !hand.motion.AttackedThisStep)
+        {
+            localGoal = raisedGuardHeld ? (hand == leftHand ? raisedLeftGuard : raisedRightGuard) : guard;
+            if (defensiveBlendActive)
+                localGoal = Vector3.Lerp(hand == leftHand ? leftDefensiveStart : rightDefensiveStart,
+                    localGoal, Mathf.SmoothStep(0f, 1f, defensiveBlendElapsed / Mathf.Max(0.01f, guardBlendTime)));
+        }
+        Vector3 goal = targetSpace.TransformPoint(localGoal);
         Vector3 delta = goal - hand.root.position;
         float distance = Mathf.Clamp(delta.magnitude,
             Mathf.Abs(hand.upperLength - hand.lowerLength) + 0.001f,
@@ -247,8 +503,10 @@ public sealed class BoxingController : MonoBehaviour
         goal = hand.root.position + direction * distance;
         hand.target.position = goal;
 
-        Vector3 hint = targetSpace.TransformPoint(Vector3.Lerp(elbowHint, punchElbowHint, hand.motion.PoseWeight)
-            + (hand.motion.Position - guard) * (0.35f * hand.motion.PoseWeight));
+        Vector3 activeElbowHint = hand.kind == PunchKind.Uppercut ? elbowHint + new Vector3(0f, 0.1f, 0.12f) : punchElbowHint;
+        Vector3 hint = targetSpace.TransformPoint(Vector3.Lerp(elbowHint, activeElbowHint, hand.motion.PoseWeight)
+            + (localGoal - guard) * (0.35f * hand.motion.PoseWeight)
+            + (raisedGuardHeld ? Vector3.up * 0.15f : Vector3.zero));
         if (hand.hint != null) hand.hint.position = hint;
     }
 
@@ -310,11 +568,16 @@ public sealed class BoxingController : MonoBehaviour
                 // A wall also consumes the strike, preventing a hit through it.
                 hand.hasHit = true;
                 var receiver = closest.GetComponentInParent<IPunchHitReceiver>();
-                if (receiver != null)
+                if (receiver != null && (hand.kind != PunchKind.Push || pushReceivers.Add(receiver)))
                 {
-                    Vector3 direction = travel.sqrMagnitude > 0.00001f ? travel.normalized : targetSpace.forward;
-                    receiver.ReceivePunch(new PunchHit(point, direction,
-                        hand.motion.Mode == BoxingMode.Straight ? straightImpulse : swingImpulse, hand.motion.Mode));
+                    Vector3 direction = hand.kind == PunchKind.Push ? targetSpace.forward
+                        : travel.sqrMagnitude > 0.00001f ? travel.normalized : targetSpace.forward;
+                    if (hand.kind == PunchKind.Push)
+                    {
+                        direction = Vector3.ProjectOnPlane(direction, Vector3.up).normalized;
+                        point = closest.ClosestPoint((ContactPosition(leftHand) + ContactPosition(rightHand)) * 0.5f);
+                    }
+                    receiver.ReceivePunch(new PunchHit(point, direction, hand.impulse, hand.motion.Mode, hand.kind));
                 }
             }
         }
@@ -323,7 +586,13 @@ public sealed class BoxingController : MonoBehaviour
 
     private void ResetTargets()
     {
+        inputBuffer.Clear();
+        pendingStrikes.Clear();
+        pushReceivers.Clear();
+        raisedGuardHeld = defensiveBlendActive = false;
         leftHand.motion.Reset(leftGuard); rightHand.motion.Reset(rightGuard);
+        torsoOwner = null;
+        SetTorsoYaw(0f);
         UpdateHand(leftHand, leftGuard, leftElbowHint, leftPunchElbowHint, 0f);
         UpdateHand(rightHand, rightGuard, rightElbowHint, rightPunchElbowHint, 0f);
         leftHand.previousContact = ContactPosition(leftHand);
@@ -333,7 +602,13 @@ public sealed class BoxingController : MonoBehaviour
     private void OnGUI()
     {
         if (showModeLabel)
-            GUI.Box(new Rect(12f, 12f, 400f, 72f), $"Boxing: {mode}\n{leftPunchAction.GetBindingDisplayString()} / {rightPunchAction.GetBindingDisplayString()}: punch\n{toggleModeAction.GetBindingDisplayString()}: change mode");
+        {
+            string left = leftPunchAction.GetBindingDisplayString();
+            string right = rightPunchAction.GetBindingDisplayString();
+            string combo = IsLeadHand(-1f) ? $"{left}-{left}-{right}" : $"{right}-{right}-{left}";
+            GUI.Box(new Rect(12f, 12f, 460f, 72f),
+                $"Boxing: {mode}{(raisedGuardHeld ? " | GUARD" : "")} | {toggleModeAction.GetBindingDisplayString()}: mode\nLight: {left} / {right} | Power: {combo}\nBoth: {(mode == BoxingMode.Straight ? "push" : "hold guard")} | {uppercutAction.GetBindingDisplayString()} then click: uppercut");
+        }
     }
 
     private void OnDrawGizmosSelected()
@@ -348,18 +623,19 @@ public sealed class BoxingController : MonoBehaviour
         Gizmos.color = color;
         Vector3 previous = targetSpace.TransformPoint(guard);
         GetCircle(side, out Vector3 pivot, out float angle, out float sweep);
-        float radius = swingRadius;
+        PunchProfile profile = leadPunch;
+        float radius = swingRadius * Mathf.Max(0.1f, profile.reachMultiplier);
         var constraint = side < 0f ? leftArmIK : rightArmIK;
         if (constraint != null && IsArmValid(constraint))
         {
             var data = constraint.data;
             radius = FittedRadius(data.root.position, Vector3.Distance(data.root.position, data.mid.position)
-                + Vector3.Distance(data.mid.position, data.tip.position), pivot);
+                + Vector3.Distance(data.mid.position, data.tip.position), pivot, radius);
         }
         for (int i = 0; i <= 40; i++)
         {
             float t = i / 40f;
-            Vector3 local = mode == BoxingMode.Straight ? Vector3.Lerp(guard, StraightStrike(guard), t)
+            Vector3 local = mode == BoxingMode.Straight ? Vector3.Lerp(guard, StraightStrike(guard, profile), t)
                 : PunchMotion.CirclePoint(pivot, radius, angle + sweep * t);
             Vector3 point = targetSpace.TransformPoint(local);
             Gizmos.DrawLine(previous, point);

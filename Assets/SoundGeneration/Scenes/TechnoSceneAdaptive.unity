@@ -963,8 +963,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ab56527effb64dffa7f9bbce3026d6e7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  gain: 0.18
+  gain: 0.24
   cutoff: 700
+  supersawMix: 0.85
+  detuneCents: 18
+  stereoWidth: 0.7
+  foundationMix: 0.35
+  kickDucking: 0.65
+  filterEnvelope: 1.8
+  darkRumbleGain: 0.08
 --- !u!82 &915744930
 AudioSource:
   m_ObjectHideFlags: 0
@@ -2388,6 +2395,14 @@ MonoBehaviour:
   pitchRadius: 8
   pitchRangeSemitones: 0.5
   pitchSmoothing: 0.5
+  beatStyle: 0
+  showStyleSelector: 1
+  enableBassMutations: 1
+  bassRandomSeed: 731
+  bassTransposeSemitones: 0
+  octaveJumpChance: 0.35
+  freakNoteChance: 0.18
+  extraBassNoteChance: 0.14
   breakClips:
   - {fileID: 8300000, guid: 4d6484867ae96f749b8b72ddc2f286eb, type: 3}
   - {fileID: 8300000, guid: 339dbf7ed853cb7479d8bad17b1cc4ae, type: 3}

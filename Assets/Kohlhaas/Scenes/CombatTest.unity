@@ -1359,6 +1359,75 @@ MonoBehaviour:
   gloveContactOffset: 0.14
   straightImpulse: 4.5
   swingImpulse: 6
+  stanceController: {fileID: 13006}
+  torsoTwist: {fileID: 17003}
+  leadPunch:
+    windupTime: 0
+    pullbackDistance: 0
+    outwardDraw: 0
+    reachMultiplier: 0.78
+    extensionTimeMultiplier: 0.8
+    recoveryTimeMultiplier: 0.85
+    impulseMultiplier: 0.65
+    torsoWindupAngle: 0
+    torsoStrikeAngle: 0
+  rearPunch:
+    windupTime: 0.1
+    pullbackDistance: 0.13
+    outwardDraw: 0.035
+    reachMultiplier: 1.08
+    extensionTimeMultiplier: 1.05
+    recoveryTimeMultiplier: 1.3
+    impulseMultiplier: 1.65
+    torsoWindupAngle: 12
+    torsoStrikeAngle: 18
+  uppercutPunch:
+    windupTime: 0
+    pullbackDistance: 0
+    outwardDraw: 0
+    reachMultiplier: 1
+    extensionTimeMultiplier: 0.8
+    recoveryTimeMultiplier: 1
+    impulseMultiplier: 1.1
+    torsoWindupAngle: 6
+    torsoStrikeAngle: 10
+  uppercutDipOffset: {x: 0, y: -0.24, z: -0.1}
+  uppercutStrikeOffset: {x: 0, y: 0.34, z: 0.19}
+  uppercutControlOffset: {x: 0, y: -0.22, z: 0.23}
+  uppercutWindupTime: 0.09
+  uppercutExtensionTime: 0.12
+  uppercutRecoveryTime: 0.18
+  uppercutImpulse: 6.5
+  simultaneousWindow: 0.045
+  uppercutInputWindow: 0.22
+  comboTapGap: 0.45
+  comboDuration: 0.9
+  punchBufferTime: 0.65
+  pushDistance: 0.38
+  pushHeight: 1.22
+  pushExtensionTime: 0.12
+  pushRecoveryTime: 0.2
+  pushImpulse: 10
+  raisedLeftGuard: {x: -0.16, y: 1.48, z: 0.26}
+  raisedRightGuard: {x: 0.16, y: 1.48, z: 0.26}
+  guardBlendTime: 0.12
+  uppercutAction:
+    m_Name: Prime Uppercut
+    m_Type: 1
+    m_ExpectedControlType: Button
+    m_Id: b5b3d26a-52c2-45cc-ba67-9ccbabd7c413
+    m_Processors:
+    m_Interactions:
+    m_SingletonActionBindings:
+    - m_Name:
+      m_Id: 24bb804f-b5c1-40f9-921e-78163a3b0f51
+      m_Path: <Keyboard>/space
+      m_Interactions:
+      m_Processors:
+      m_Groups:
+      m_Action: Prime Uppercut
+      m_Flags: 0
+    m_Flags: 0
 --- !u!114 &13002
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1434,6 +1503,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_RigLayers:
+  - m_Rig: {fileID: 17002}
+    m_Active: 1
   - m_Rig: {fileID: 13004}
     m_Active: 1
   m_Effectors: []
@@ -4081,6 +4152,7 @@ Transform:
   - {fileID: 1781217897}
   - {fileID: 589764906}
   - {fileID: 947250801}
+  - {fileID: 17001}
   m_Father: {fileID: 11001}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &757916678
@@ -5199,6 +5271,74 @@ Transform:
   - {fileID: 1349867940}
   m_Father: {fileID: 355147740}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &17000
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 17001}
+  - component: {fileID: 17002}
+  - component: {fileID: 17003}
+  m_Layer: 0
+  m_Name: Punch Torso Rig
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &17001
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 17000}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 721178811}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &17002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 17000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 70b342d8ce5c2fd48b8fa3147d48d1d1, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  m_Weight: 1
+  m_Effectors: []
+--- !u!114 &17003
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 17000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cf219326d2292de48a0c671da18d402b, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  m_Weight: 1
+  m_Data:
+    m_ConstrainedObject: {fileID: 1509654662}
+    m_OverrideSource: {fileID: 0}
+    m_OverridePosition: {x: 0, y: 0, z: 0}
+    m_OverrideRotation: {x: 0, y: 0, z: 0}
+    m_PositionWeight: 0
+    m_RotationWeight: 1
+    m_Space: 2
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
